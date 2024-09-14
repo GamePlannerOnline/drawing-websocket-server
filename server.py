@@ -1,21 +1,33 @@
-import asyncio
-import websockets
-import logging
+import json
+from typing import List
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
-# create handler for each connection
+app = FastAPI()
 
-PORT = 8000
-HOST = "0.0.0.0"
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-async def handler(websocket: websockets.WebSocketServerProtocol, path):
-    data = await websocket.recv()
-    reply = f"Data recieved as: {data}!"
-    await websocket.send(reply)
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
 
-start_server = websockets.serve(handler, HOST, PORT)
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
 
-asyncio.get_event_loop().run_until_complete(start_server)
-asyncio.get_event_loop().run_forever()
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
 
-logging.info(f"Server started at ws://{HOST}:{PORT}")
+manager = ConnectionManager()
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.broadcast(data)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
